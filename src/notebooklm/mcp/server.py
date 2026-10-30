@@ -28,7 +28,9 @@ from types import TracebackType
 from typing import Literal, cast
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.auth import AuthProvider
+from fastmcp.server.middleware import Middleware
 
 from .._adapter_support import DEFAULT_SERVER_KEEPALIVE_INTERVAL
 from .._app.profiles import configured_profiles, profile_startup_timeout
@@ -39,6 +41,24 @@ from ._clientprovider import ClientProvider
 from ._context import AppState, ProfileRegistry
 from ._filelink import FileTransferConfig
 from ._profiles import PROFILE_STARTUP_TIMEOUT_ENV, ProfileTools, profile_lifespan
+
+
+class ReadOnlyGuard(Middleware):
+    """Reject tool calls outside the explicit read-only allowlist."""
+
+    ALLOWED_TOOLS = {
+        "notebook_list",
+        "notebook_describe",
+        "source_list",
+        "source_read",
+    }
+
+    async def on_call_tool(self, context, call_next):
+        name = context.message.name
+        if name not in self.ALLOWED_TOOLS:
+            raise ToolError(f"Herramienta no autorizada en modo de solo lectura: {name}")
+        return await call_next(context)
+
 
 __all__ = ["SERVER_INSTRUCTIONS", "SERVER_NAME", "create_server", "register_all"]
 
@@ -136,6 +156,7 @@ def create_server(
     client_factory: ClientFactory | None = None,
     auth: AuthProvider | None = None,
     file_transfer: FileTransferConfig | None = None,
+    read_only: bool = False,
 ) -> FastMCP:
     """Build the FastMCP server.
 
@@ -170,7 +191,8 @@ def create_server(
         A configured :class:`~fastmcp.FastMCP` server whose lifespan binds one
         client per configured profile and which has every tool module registered.
     """
-
+    if read_only:
+        file_transfer = None
     if profiles is not None and profile is not None:
         raise ValueError("profile and profiles are mutually exclusive")
     paths = configured_profiles(profiles) if profiles is not None else {}
@@ -259,16 +281,23 @@ def create_server(
     mcp = FastMCP(name=SERVER_NAME, instructions=instructions, lifespan=lifespan, auth=auth)
     registrar = cast(FastMCP, ProfileTools(mcp)) if multi_profile else mcp
     register_all(registrar)
+    if read_only:
+        mcp.enable(
+            names={"notebook_list", "notebook_describe", "source_list", "source_read"},
+            components={"tool"},
+            only=True,
+        )
+        mcp.add_middleware(ReadOnlyGuard())
     if file_transfer is not None:
         # Import lazily so a build without file transfer never imports the route
         # module (and stdio stays untouched).
         from ._fileroutes import register_file_routes
 
         register_file_routes(mcp, file_transfer)
-    # Dev-only in-app upload widget (Phase 3 experiment). No-op unless NOTEBOOKLM_MCP_UPLOAD_WIDGET=1,
-    # so it never enters the prod manifest. Lazy import keeps the fastmcp.apps dependency off the
-    # default path.
-    from ._uploadwidget import register_upload_widget
+    # Dev-only in-app upload widget (Phase 3 experiment).
+    # It is not registered in read-only mode.
+    if not read_only:
+        from ._uploadwidget import register_upload_widget
 
-    register_upload_widget(registrar, file_transfer)
+        register_upload_widget(registrar, file_transfer)
     return mcp

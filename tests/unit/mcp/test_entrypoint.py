@@ -80,7 +80,9 @@ def test_defaults_wire_stdio_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_server = MagicMock()
     created: dict[str, object] = {}
 
-    def fake_create_server(*, profile: str | None = None, client_factory=None, file_transfer=None):
+    def fake_create_server(
+        *, profile: str | None = None, client_factory=None, file_transfer=None, read_only=False
+    ):
         created["profile"] = profile
         return fake_server
 
@@ -115,7 +117,23 @@ def test_backend_flag_threads_to_stdio_server(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(entry, "create_server", fake_create_server)
     entry.main(["--backend", "android"])
 
-    assert captured == {"profile": None, "backend": "android"}
+    assert captured == {"profile": None, "backend": "android", "read_only": False}
+    fake_server.run.assert_called_once_with(transport="stdio", show_banner=False)
+
+
+def test_read_only_flag_threads_to_stdio_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NOTEBOOKLM_PROFILE", raising=False)
+    fake_server = MagicMock()
+    captured: dict[str, object] = {}
+
+    def fake_create_server(**kwargs: object) -> MagicMock:
+        captured.update(kwargs)
+        return fake_server
+
+    monkeypatch.setattr(entry, "create_server", fake_create_server)
+    entry.main(["--read-only"])
+
+    assert captured == {"profile": None, "read_only": True}
     fake_server.run.assert_called_once_with(transport="stdio", show_banner=False)
 
 
@@ -129,7 +147,9 @@ def test_explicit_http_transport_binds_loopback(monkeypatch: pytest.MonkeyPatch)
     fake_server = MagicMock()
     captured: dict[str, object] = {}
 
-    def fake_create_server(*, profile=None, client_factory=None, auth=None, file_transfer=None):
+    def fake_create_server(
+        *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False
+    ):
         captured["auth"] = auth
         return fake_server
 
@@ -228,7 +248,9 @@ def test_http_threads_profile_into_oauth_config(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         entry,
         "create_server",
-        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None: MagicMock(),
+        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False: (
+            MagicMock()
+        ),
     )
     monkeypatch.delenv("NOTEBOOKLM_MCP_TOKEN", raising=False)
     monkeypatch.delenv("NOTEBOOKLM_MCP_ALLOW_EXTERNAL_BIND", raising=False)
@@ -246,7 +268,9 @@ def test_http_default_port_is_9420(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         entry,
         "create_server",
-        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None: fake_server,
+        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False: (
+            fake_server
+        ),
     )
     monkeypatch.delenv("NOTEBOOKLM_MCP_PORT", raising=False)
     monkeypatch.delenv("NOTEBOOKLM_MCP_ALLOW_EXTERNAL_BIND", raising=False)
@@ -264,7 +288,9 @@ def test_http_external_bind_installs_guard_in_bypass_mode(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         entry,
         "create_server",
-        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None: fake_server,
+        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False: (
+            fake_server
+        ),
     )
     monkeypatch.setenv("NOTEBOOKLM_MCP_ALLOW_EXTERNAL_BIND", "1")
     monkeypatch.setenv("NOTEBOOKLM_MCP_TOKEN", _STRONG_PW)
@@ -282,7 +308,9 @@ def test_http_run_disables_uvicorn_proxy_headers(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         entry,
         "create_server",
-        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None: fake_server,
+        lambda *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False: (
+            fake_server
+        ),
     )
     monkeypatch.delenv("NOTEBOOKLM_MCP_ALLOW_EXTERNAL_BIND", raising=False)
     monkeypatch.delenv("NOTEBOOKLM_MCP_TOKEN", raising=False)
@@ -328,7 +356,9 @@ def test_http_loopback_with_token_attaches_auth(monkeypatch: pytest.MonkeyPatch)
     fake_server = MagicMock()
     captured: dict[str, object] = {}
 
-    def fake_create_server(*, profile=None, client_factory=None, auth=None, file_transfer=None):
+    def fake_create_server(
+        *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False
+    ):
         captured["auth"] = auth
         return fake_server
 
@@ -365,7 +395,9 @@ def test_http_non_loopback_with_token_attaches_auth(monkeypatch: pytest.MonkeyPa
     fake_server = MagicMock()
     captured: dict[str, object] = {}
 
-    def fake_create_server(*, profile=None, client_factory=None, auth=None, file_transfer=None):
+    def fake_create_server(
+        *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False
+    ):
         captured["auth"] = auth
         return fake_server
 
@@ -387,7 +419,9 @@ def test_http_non_loopback_with_oauth_only_satisfies_gate(monkeypatch: pytest.Mo
     fake_server = MagicMock()
     captured: dict[str, object] = {}
 
-    def fake_create_server(*, profile=None, client_factory=None, auth=None, file_transfer=None):
+    def fake_create_server(
+        *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False
+    ):
         captured["auth"] = auth
         return fake_server
 
@@ -412,7 +446,9 @@ def test_http_non_loopback_with_oauth_and_bearer_composes_multiauth(
     fake_server = MagicMock()
     captured: dict[str, object] = {}
 
-    def fake_create_server(*, profile=None, client_factory=None, auth=None, file_transfer=None):
+    def fake_create_server(
+        *, profile=None, client_factory=None, auth=None, file_transfer=None, read_only=False
+    ):
         captured["auth"] = auth
         return fake_server
 

@@ -46,6 +46,64 @@ def test_create_server_returns_fastmcp(mock_client: MagicMock) -> None:
     assert server.name == SERVER_NAME
 
 
+async def test_read_only_server_exposes_only_allowed_tools() -> None:
+    """Read-only mode exposes only the four approved query tools."""
+    expected = {
+        "notebook_list",
+        "notebook_describe",
+        "source_list",
+        "source_read",
+    }
+
+    async with Client(create_server(read_only=True)) as client:
+        tools = await client.list_tools()
+
+    assert {tool.name for tool in tools} == expected
+
+
+async def test_read_only_server_excludes_upload_widget_and_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Read-only mode must not register the experimental upload widget."""
+    monkeypatch.setenv("NOTEBOOKLM_MCP_UPLOAD_WIDGET", "1")
+
+    server = create_server(read_only=True)
+    tools = await server._list_tools()
+    resources = await server._list_resources()
+
+    assert "source_add_widget" not in {tool.name for tool in tools}
+    assert "ui://notebooklm/upload-v1" not in {str(resource.uri) for resource in resources}
+
+
+def test_read_only_server_does_not_register_file_routes() -> None:
+    """Read-only mode must suppress file routes even with a valid config."""
+    from notebooklm.mcp._filelink import FileLinkSigner, FileTransferConfig
+
+    config = FileTransferConfig(
+        signer=FileLinkSigner(b"k" * 32),
+        base_url="https://files.test",
+    )
+
+    server = create_server(read_only=True, file_transfer=config)
+
+    assert not any(
+        route.path.startswith("/files/") or route.path.startswith("/u/")
+        for route in server._additional_http_routes
+    )
+
+
+async def test_read_only_server_rejects_write_tool_calls() -> None:
+    """Read-only mode rejects calls to tools outside its allowlist."""
+    from fastmcp.exceptions import ToolError
+
+    async with Client(create_server(read_only=True)) as client:
+        with pytest.raises(ToolError, match="no autorizada en modo de solo lectura"):
+            await client.call_tool(
+                "notebook_delete",
+                {"notebook_id": "prueba-seguridad"},
+            )
+
+
 async def test_in_memory_client_connects(server_factory) -> None:
     """The in-memory FastMCP Client can open a session against the server."""
     async with Client(server_factory()) as client:
@@ -265,6 +323,32 @@ def test_main_http_loopback_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert runs and runs[0]["transport"] == "http"
     assert runs[0]["host"] == "127.0.0.1"
     assert runs[0]["port"] == 9123
+
+
+def test_main_http_read_only_disables_file_transfer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+    fake_server = MagicMock()
+    fake_server.run = lambda *a, **k: None
+
+    def fake_create(**kw: object) -> MagicMock:
+        seen.update(kw)
+        return fake_server
+
+    monkeypatch.setattr(entry, "create_server", fake_create)
+    entry.main(
+        [
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--read-only",
+        ]
+    )
+
+    assert seen["read_only"] is True
+    assert seen["file_transfer"] is None
 
 
 def test_main_passes_profile(monkeypatch: pytest.MonkeyPatch) -> None:

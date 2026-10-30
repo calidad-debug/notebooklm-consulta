@@ -54,6 +54,31 @@ async def test_every_tool_requires_profile_and_preserves_manifest(profiles):
         assert "profile" not in original[tool.name].parameters.get("properties", {})
 
 
+async def test_read_only_multi_profile_exposes_only_allowed_tools(profiles):
+    _, factory = profiles
+    server = create_server(
+        profiles=["work", "personal"],
+        backend="android",
+        profile_client_factory=factory,
+        read_only=True,
+    )
+
+    async with Client(server) as session:
+        tools = await session.list_tools()
+        assert {tool.name for tool in tools} == {
+            "notebook_list",
+            "notebook_describe",
+            "source_list",
+            "source_read",
+        }
+
+        with pytest.raises(ToolError):
+            await session.call_tool(
+                "notebook_delete",
+                {"profile": "work", "notebook_id": "test"},
+            )
+
+
 async def test_concurrent_calls_route_without_global_state(profiles):
     clients, factory = profiles
     entered = {name: asyncio.Event() for name in clients}

@@ -228,6 +228,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("NOTEBOOKLM_LOG_LEVEL", "INFO"),
         help="Logging level on stderr (default: INFO).",
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="Allow only read-only NotebookLM tools.",
+    )
     return parser
 
 
@@ -329,11 +334,12 @@ def main(argv: list[str] | None = None) -> None:
         oauth = build_oauth_provider(oauth_config) if oauth_config else None
         # Optional remote file transfer: built only here (http path), validated, and
         # absent (None) when no public URL is set — never a startup crash.
-        file_transfer = _build_file_transfer()
+        file_transfer = None if args.read_only else _build_file_transfer()
         server_kwargs = {
             **profile_kwargs,
             "auth": build_auth(token, oauth),
             "file_transfer": file_transfer,
+            "read_only": args.read_only,
         }
         server = _create_server(**server_kwargs)
         # proxy_headers=False: Uvicorn defaults to rewriting the peer address from
@@ -375,7 +381,7 @@ def main(argv: list[str] | None = None) -> None:
     else:
         # show_banner=False keeps FastMCP's startup banner out of the host's logs
         # (and off stdout — stdio requires uncontaminated JSON-RPC).
-        server = _create_server(**profile_kwargs)
+        server = _create_server(**profile_kwargs, read_only=args.read_only)
         server.run(transport="stdio", show_banner=False)
 
 
